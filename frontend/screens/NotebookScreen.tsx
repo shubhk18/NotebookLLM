@@ -6,6 +6,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  TouchableOpacity,
+  Keyboard,
 } from 'react-native';
 import {
   TextInput,
@@ -21,9 +23,13 @@ import {
   Portal,
   Modal,
   ActivityIndicator,
+  FAB,
+  Text,
+  Tooltip,
 } from 'react-native-paper';
 import axios from 'axios';
 import { API_URL } from '../config';
+import Markdown from 'react-native-markdown-display';
 
 interface Cell {
   id: string;
@@ -38,24 +44,36 @@ const CodeEditor: React.FC<{
   content: string;
   onChangeText: (text: string) => void;
   onExecute: () => void;
+  onDelete: () => void;
   isExecuting: boolean;
-}> = ({ content, onChangeText, onExecute, isExecuting }) => {
+}> = ({ content, onChangeText, onExecute, onDelete, isExecuting }) => {
   const theme = useTheme();
 
   return (
     <Surface style={styles.codeEditorContainer}>
       <View style={styles.codeHeader}>
-        <View style={styles.languageIndicator}>
-          <Text style={styles.languageText}>Python</Text>
+        <View style={styles.codeHeaderLeft}>
+          <View style={styles.languageIndicator}>
+            <Text style={styles.languageText}>Python</Text>
+          </View>
         </View>
-        <IconButton
-          icon={isExecuting ? 'loading' : 'play'}
-          mode="contained"
-          onPress={onExecute}
-          disabled={isExecuting}
-          style={styles.executeButton}
-          size={20}
-        />
+        <View style={styles.codeHeaderRight}>
+          <IconButton
+            icon={isExecuting ? 'loading' : 'play'}
+            mode="contained"
+            onPress={onExecute}
+            disabled={isExecuting}
+            style={styles.executeButton}
+            size={20}
+          />
+          <IconButton
+            icon="delete"
+            mode="contained"
+            onPress={onDelete}
+            style={styles.deleteButton}
+            size={20}
+          />
+        </View>
       </View>
       <TextInput
         mode="flat"
@@ -133,15 +151,34 @@ const ChatInput: React.FC<{
 const ChatMessage: React.FC<{
   content: string;
   type: 'chat' | 'assistant';
-}> = ({ content, type }) => {
+  onCreateCell?: (type: 'code' | 'text') => void;
+}> = ({ content, type, onCreateCell }) => {
   const theme = useTheme();
+  const [showActions, setShowActions] = useState(false);
+  
+  // Check if the message contains code blocks
+  const hasCodeBlock = content.includes('```');
   
   return (
     <Surface style={[
       styles.messageContainer,
       type === 'chat' ? styles.userMessage : styles.assistantMessage
     ]}>
-      <Paragraph style={styles.messageText}>{content}</Paragraph>
+      <Markdown style={styles.markdownStyles}>
+        {content}
+      </Markdown>
+      {type === 'assistant' && hasCodeBlock && (
+        <View style={styles.messageActions}>
+          <Button
+            mode="contained-tonal"
+            onPress={() => onCreateCell?.('code')}
+            icon="plus-box"
+            style={styles.actionButton}
+          >
+            Add as Code Cell
+          </Button>
+        </View>
+      )}
     </Surface>
   );
 };
@@ -149,8 +186,9 @@ const ChatMessage: React.FC<{
 const NotebookScreen: React.FC = () => {
   const [cells, setCells] = useState<Cell[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     // Initialize with a welcome message
@@ -159,12 +197,93 @@ const NotebookScreen: React.FC = () => {
         {
           id: Date.now().toString(),
           type: 'assistant',
-          content: '👋 Hi! I\'m your AI assistant. I can help you with:\n\n• Writing and executing code\n• Explaining concepts\n• Answering questions\n\nWhat would you like to do?',
+          content: '👋 Hi! I\'m your AI coding assistant. I can help you with:\n\n• Writing and executing Python code\n• Explaining concepts\n• Debugging issues\n• Answering questions\n\nTry asking me something or use the + button to add a code cell!',
           timestamp: new Date(),
         },
       ]);
     }
   }, []);
+
+  // Add keyboard shortcuts
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const handleKeyPress = (event: KeyboardEvent) => {
+        // Check if Ctrl/Cmd key is pressed
+        const isCtrlCmd = event.metaKey || event.ctrlKey;
+        
+        if (isCtrlCmd) {
+          switch (event.key) {
+            case 'Enter': // Ctrl/Cmd + Enter to execute current cell
+              // Find the last code cell and execute it
+              const lastCodeCell = [...cells].reverse().find(cell => cell.type === 'code');
+              if (lastCodeCell) {
+                executeCode(lastCodeCell.id);
+              }
+              event.preventDefault();
+              break;
+            
+            case 'b': // Ctrl/Cmd + B to add code cell
+              addCell('code');
+              event.preventDefault();
+              break;
+            
+            case 't': // Ctrl/Cmd + T to add text cell
+              addCell('text');
+              event.preventDefault();
+              break;
+            
+            case 's': // Ctrl/Cmd + S to save (placeholder)
+              event.preventDefault();
+              // TODO: Implement save functionality
+              break;
+          }
+        }
+      };
+
+      // Add event listener
+      window.addEventListener('keydown', handleKeyPress);
+
+      // Cleanup
+      return () => {
+        window.removeEventListener('keydown', handleKeyPress);
+      };
+    }
+  }, [cells]); // Add cells as dependency to access latest state
+
+  // Add keyboard shortcuts help modal
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const ShortcutsModal = () => (
+    <Portal>
+      <Modal
+        visible={showShortcuts}
+        onDismiss={() => setShowShortcuts(false)}
+        contentContainerStyle={styles.modalContainer}
+      >
+        <Title>Keyboard Shortcuts</Title>
+        <Divider style={styles.divider} />
+        <View style={styles.shortcutRow}>
+          <Text>Ctrl/Cmd + Enter</Text>
+          <Text>Execute current cell</Text>
+        </View>
+        <View style={styles.shortcutRow}>
+          <Text>Ctrl/Cmd + B</Text>
+          <Text>Add code cell</Text>
+        </View>
+        <View style={styles.shortcutRow}>
+          <Text>Ctrl/Cmd + T</Text>
+          <Text>Add text cell</Text>
+        </View>
+        <View style={styles.shortcutRow}>
+          <Text>Ctrl/Cmd + S</Text>
+          <Text>Save notebook</Text>
+        </View>
+        <Button mode="contained" onPress={() => setShowShortcuts(false)} style={styles.closeButton}>
+          Close
+        </Button>
+      </Modal>
+    </Portal>
+  );
 
   const addCell = (type: Cell['type']) => {
     const newCell: Cell = {
@@ -176,6 +295,15 @@ const NotebookScreen: React.FC = () => {
     };
     setCells(prev => [...prev, newCell]);
     setMenuVisible(false);
+    
+    // Scroll to the new cell
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  const deleteCell = (id: string) => {
+    setCells(prev => prev.filter(cell => cell.id !== id));
   };
 
   const updateCellContent = (id: string, content: string) => {
@@ -212,11 +340,11 @@ const NotebookScreen: React.FC = () => {
         outputCell,
         ...prev.slice(cellIndex + 1),
       ]);
-    } catch (error) {
+    } catch (error: any) {
       const errorCell: Cell = {
         id: Date.now().toString(),
         type: 'output',
-        content: 'Error executing code. Please try again.',
+        content: `Error: ${error.response?.data?.detail || 'Something went wrong. Please try again.'}`,
         timestamp: new Date(),
       };
       setCells(prev => [
@@ -228,6 +356,10 @@ const NotebookScreen: React.FC = () => {
       setCells(prev =>
         prev.map(c => (c.id === id ? { ...c, isExecuting: false } : c))
       );
+      // Scroll to show the output
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
   };
 
@@ -245,12 +377,10 @@ const NotebookScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      console.log('Sending message:', message); // Debug log
       const response = await axios.post(`${API_URL}/chat`, {
         message: message.trim(),
-        model: "llama3.2"
+        model: "codellama:7b-instruct"
       });
-      console.log('Received response:', response.data); // Debug log
 
       // Add assistant response
       const assistantCell: Cell = {
@@ -261,7 +391,6 @@ const NotebookScreen: React.FC = () => {
       };
       setCells(prev => [...prev, assistantCell]);
     } catch (error: any) {
-      console.error('Chat error:', error.response?.data || error); // Enhanced error logging
       // Add error message
       const errorCell: Cell = {
         id: (Date.now() + 1).toString(),
@@ -275,6 +404,10 @@ const NotebookScreen: React.FC = () => {
       // Scroll to bottom
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }
+  };
+
+  const handleCreateCellFromMessage = (type: 'code' | 'text') => {
+    addCell(type);
   };
 
   return (
@@ -294,12 +427,17 @@ const NotebookScreen: React.FC = () => {
                 content={cell.content}
                 onChangeText={(text) => updateCellContent(cell.id, text)}
                 onExecute={() => executeCode(cell.id)}
+                onDelete={() => deleteCell(cell.id)}
                 isExecuting={cell.isExecuting || false}
               />
             ) : cell.type === 'output' ? (
               <OutputDisplay content={cell.content} />
             ) : cell.type === 'chat' || cell.type === 'assistant' ? (
-              <ChatMessage content={cell.content} type={cell.type} />
+              <ChatMessage 
+                content={cell.content} 
+                type={cell.type}
+                onCreateCell={handleCreateCellFromMessage}
+              />
             ) : (
               <TextInput
                 mode="outlined"
@@ -315,37 +453,53 @@ const NotebookScreen: React.FC = () => {
 
       <View style={styles.bottomContainer}>
         <ChatInput onSend={handleSendMessage} isLoading={isLoading} />
-        <View style={styles.toolbar}>
-          <Button
-            mode="contained"
-            onPress={() => setMenuVisible(true)}
-            icon="plus"
-          >
-            Add Cell
-          </Button>
+        <FAB
+          icon="plus"
+          style={styles.fab}
+          onPress={() => addCell('code')}
+          onLongPress={() => setMenuVisible(true)}
+          label="Add Code Cell"
+        />
+        <FAB
+          icon="keyboard"
+          style={[styles.fab, styles.helpFab]}
+          onPress={() => setShowShortcuts(true)}
+          small
+        />
+        <Portal>
           <Menu
             visible={menuVisible}
             onDismiss={() => setMenuVisible(false)}
-            anchor={<View />}
+            anchor={<View style={{ position: 'absolute', right: 16, bottom: 80 }} />}
           >
             <Menu.Item
-              onPress={() => addCell('code')}
-              title="Code Cell"
-              leadingIcon="code-tags"
+              onPress={() => {
+                addCell('code');
+                setMenuVisible(false);
+              }}
+              title="Python Code Cell"
+              leadingIcon="language-python"
             />
             <Menu.Item
-              onPress={() => addCell('text')}
-              title="Text Cell"
+              onPress={() => {
+                addCell('text');
+                setMenuVisible(false);
+              }}
+              title="Text Note"
               leadingIcon="text"
             />
             <Menu.Item
-              onPress={() => addCell('markdown')}
-              title="Markdown Cell"
+              onPress={() => {
+                addCell('markdown');
+                setMenuVisible(false);
+              }}
+              title="Markdown Note"
               leadingIcon="markdown"
             />
           </Menu>
-        </View>
+        </Portal>
       </View>
+      <ShortcutsModal />
     </KeyboardAvoidingView>
   );
 };
@@ -359,11 +513,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    padding: 16,
     paddingBottom: 100,
   },
   cellContainer: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
   bottomContainer: {
     position: 'absolute',
@@ -403,10 +557,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
   },
-  toolbar: {
+  messageActions: {
+    marginTop: 8,
     flexDirection: 'row',
-    justifyContent: 'center',
-    paddingVertical: 8,
+    justifyContent: 'flex-end',
+  },
+  actionButton: {
+    marginLeft: 8,
   },
   codeEditorContainer: {
     borderRadius: 12,
@@ -427,6 +584,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eaeaea',
   },
+  codeHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  codeHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   languageIndicator: {
     backgroundColor: '#e8f0fe',
     paddingHorizontal: 12,
@@ -440,6 +605,11 @@ const styles = StyleSheet.create({
   },
   executeButton: {
     backgroundColor: '#1a73e8',
+    margin: 0,
+    marginRight: 8,
+  },
+  deleteButton: {
+    backgroundColor: '#dc3545',
     margin: 0,
   },
   codeInput: {
@@ -490,6 +660,53 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+  },
+  fab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 80,
+    backgroundColor: '#1a73e8',
+  },
+  helpFab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 140,
+    backgroundColor: '#666',
+  },
+  markdownStyles: {
+    body: {
+      color: '#333333',
+      fontSize: 16,
+    },
+    code_block: {
+      backgroundColor: '#f5f5f5',
+      padding: 8,
+      borderRadius: 4,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    fence: {
+      backgroundColor: '#f5f5f5',
+      padding: 8,
+      borderRadius: 4,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    padding: 20,
+    margin: 20,
+    borderRadius: 8,
+  },
+  divider: {
+    marginVertical: 10,
+  },
+  shortcutRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  closeButton: {
+    marginTop: 20,
   },
 });
 

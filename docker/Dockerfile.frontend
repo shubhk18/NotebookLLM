@@ -1,4 +1,4 @@
-# Use Node.js LTS version
+# Use an official Node runtime as a parent image
 FROM node:18-slim
 
 # Set working directory
@@ -10,36 +10,35 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Expo CLI globally
-RUN npm install -g expo-cli @expo/cli
-
 # Copy package files
 COPY frontend/package*.json ./
 
-# Install dependencies and fix versions
-RUN npm install && \
-    npm install react-native@0.72.10 && \
-    npm install react-native-web@~0.19.6 react-dom@18.2.0 @expo/webpack-config@^19.0.0 && \
-    npm install @expo/vector-icons react-native-vector-icons && \
-    npx expo install --fix
+# Install dependencies
+RUN npm install
+RUN npm install -g expo-cli
+RUN npx expo install @expo/vector-icons react-native-vector-icons
+RUN npx expo install react-native-screens react-native-safe-area-context
 
 # Copy the frontend code
 COPY frontend/ .
 
-# Expose development server port
+# Create the necessary directory for vector-icons
+RUN mkdir -p android/app/src/main/assets/fonts && mkdir -p ios/notebookllm/Fonts
+
+# Copy vector-icons fonts
+RUN cp -R ./node_modules/react-native-vector-icons/Fonts/* android/app/src/main/assets/fonts/ || true
+RUN cp -R ./node_modules/react-native-vector-icons/Fonts/* ios/notebookllm/Fonts/ || true
+
+# Expose ports
 EXPOSE 19000
 EXPOSE 19001
 EXPOSE 19002
 EXPOSE 19006
 
-# Set environment variables for Expo
+# Set environment variables
 ENV EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
 ENV REACT_NATIVE_PACKAGER_HOSTNAME=0.0.0.0
 ENV NODE_ENV=development
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:19006/ || exit 1
-
-# Start Expo development server
+# Start the app
 CMD ["npx", "expo", "start", "--web"] 
