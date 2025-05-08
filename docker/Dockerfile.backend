@@ -1,6 +1,9 @@
 # Use an official Python runtime as a parent image
 FROM python:3.9-slim
 
+# Note: When running this container, ensure to add --add-host=host.docker.internal:host-gateway
+# to the docker run command or the equivalent in docker-compose.yml
+
 # Set working directory
 WORKDIR /app
 

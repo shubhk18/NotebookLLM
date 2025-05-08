@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Expo CLI globally
@@ -15,8 +16,12 @@ RUN npm install -g expo-cli @expo/cli
 # Copy package files
 COPY frontend/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies and fix versions
+RUN npm install && \
+    npm install react-native@0.72.10 && \
+    npm install react-native-web@~0.19.6 react-dom@18.2.0 @expo/webpack-config@^19.0.0 && \
+    npm install @expo/vector-icons react-native-vector-icons && \
+    npx expo install --fix
 
 # Copy the frontend code
 COPY frontend/ .
@@ -25,10 +30,16 @@ COPY frontend/ .
 EXPOSE 19000
 EXPOSE 19001
 EXPOSE 19002
+EXPOSE 19006
 
 # Set environment variables for Expo
 ENV EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
 ENV REACT_NATIVE_PACKAGER_HOSTNAME=0.0.0.0
+ENV NODE_ENV=development
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:19006/ || exit 1
 
 # Start Expo development server
-CMD ["npx", "expo", "start"] 
+CMD ["npx", "expo", "start", "--web"] 
