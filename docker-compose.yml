@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   backend:
+    image: shubhk18/notebookllm-backend:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
@@ -22,6 +23,7 @@ services:
       retries: 3
 
   frontend:
+    image: shubhk18/notebookllm-frontend:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
